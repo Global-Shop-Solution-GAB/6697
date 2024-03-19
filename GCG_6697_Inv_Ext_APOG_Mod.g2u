@@ -1,0 +1,92 @@
+﻿Program.Sub.Preflight.Start
+V.Global.bConOpen.Declare
+Program.Sub.Preflight.End
+
+Program.Sub.Main.Start
+F.Intrinsic.Control.Try
+	V.Local.iBDFRow.Declare
+	V.Local.iRowCount.Declare
+	V.Local.sRowContent.Declare
+	V.Local.sRowContentArray.Declare
+	V.Local.sFilter.Declare
+	V.Local.sColumns.Declare
+	V.Local.bHasNewColumn.Declare
+	V.Local.iLastElement.Declare
+
+	
+	'Create data table with all parts' extended descriptions 
+	F.ODBC.Connection!con.OpenCompanyConnection
+	V.Global.bConOpen.Set(True)
+	
+	'F.Data.DataTable.CreateFromSQL("dtPartDesc", "con", "select PART, TEXT from INV_EXTRA_TEXT")
+	'Grid won't populate w/ carriage returns in the data
+	F.Data.DataTable.CreateFromSQL("dtPartDesc", "con", "select PART, RTRIM(REPLACE(REPLACE(REPLACE(TEXT,Char(10),' '),Char(13),' '),Char(9),' ')) AS TEXT from INV_EXTRA_TEXT")
+
+	'Begin loading in BDF, clone, modify, and write it back 
+	F.Intrinsic.BDF.Load("PartsGrid", "AutomatedPurchaseOrderGeneration-dgvAutoPO-bdf")
+	F.Intrinsic.BDF.Clone("PartsGrid", "PartCopy")
+	F.Intrinsic.BDF.ReadRowCount("PartsGrid", V.Local.iRowCount)
+	' 6/30/2023 DRH This program needs to run so the column is serialized.
+'	F.Intrinsic.Control.If(V.Local.iRowCount, =, 0)
+'		F.Intrinsic.Control.End
+'	F.Intrinsic.Control.EndIf
+	V.Local.iRowCount.Set(V.Local.iRowCount.--)
+
+	F.Intrinsic.BDF.ReadColumnTitle("PartCopy", V.Local.sColumns)
+	F.Intrinsic.String.IsInString(V.Local.sColumns, "Ext Description", False, V.Local.bHasNewColumn)
+	F.Intrinsic.Control.If(V.Local.bHasNewColumn.Not)
+		F.Intrinsic.BDF.AddColumn("PartCopy", "Ext Description", "String")
+	F.Intrinsic.Control.EndIf
+
+' 6/30/2023 DRH Just to be sure we don't enter the loop where the row count = 0.
+	F.Intrinsic.Control.If(V.Local.iRowCount, =, 0)
+	F.Intrinsic.Control.Else
+		F.Intrinsic.Control.For(V.Local.iBDFRow, 0, V.Local.iRowCount, 1)
+			V.Local.sRowContentArray.Redim(0, 0)
+			F.Intrinsic.BDF.ReadRow("PartsGrid", V.Local.iBDFRow, V.Local.sRowContent)
+			F.Intrinsic.String.Split(V.Local.sRowContent, "|~|", V.Local.sRowContentArray)		
+			'Add element at the end of array corresponding to data for new column, only if not already there
+			F.Intrinsic.Control.If(V.Local.bHasNewColumn.Not)
+				F.Intrinsic.Variable.AddToArray(V.Local.sRowContentArray, "")
+			F.Intrinsic.Control.EndIf
+			
+			'1st Element is the part 
+			V.Local.sRowContentArray(0).Set(V.Local.sRowContentArray(0).Trim)
+			F.Intrinsic.String.Build("PART = '{0}'", V.Local.sRowContentArray(0).PSQLFriendly, V.Local.sFilter)
+			'Filter datatable to a dataview, passing to it the part the row in the bdf is currently on. If empty, means no matches in system for ext desc, so move on. 
+			'Need to do this since GAB has no built in function for checking if a key exists in a dictionary
+			F.Data.DataView.Create("dtPartDesc", "dvFiltered", 22, V.Local.sFilter, )
+			F.Intrinsic.Control.If(V.DataView.dtPartDesc!dvFiltered.RowCount, <>, 0)
+				'If new column wasn't originally there, add it here. Otherwise, if it's being refreshed, replace previous data (last element of array)
+				V.Local.sRowContentArray(V.Local.sRowContentArray.UBound).Set(V.DataView.dtPartDesc!dvFiltered(0).TEXT!FieldValTrim)
+			F.Intrinsic.Control.EndIf
+			
+			F.Data.DataView.Close("dtPartDesc", "dvFiltered")
+			F.Intrinsic.String.Join(V.Local.sRowContentArray, "|~|", V.Local.sRowContent)
+			F.Intrinsic.BDF.WriteRow("PartCopy", V.Local.sRowContent)
+		F.Intrinsic.Control.Next(V.Local.iBDFRow)
+	F.Intrinsic.Control.EndIf
+	
+	F.Intrinsic.BDF.Save("PartCopy", "AutomatedPurchaseOrderGeneration-dgvAutoPO-bdf")
+
+F.Intrinsic.Control.Catch
+	F.Intrinsic.Control.CallSub(ErrorMsg, CurrentSub, V.Ambient.CurrentSubroutine)
+F.Intrinsic.Control.EndTry
+Program.Sub.Main.End
+
+Program.Sub.ErrorMsg.Start
+V.Local.sError.Declare
+
+F.Intrinsic.Control.If(V.Global.bConOpen)
+	F.ODBC.Connection!con.Close
+F.Intrinsic.Control.EndIf	
+
+'Generic Error message.
+f.Intrinsic.String.Build("Project GCG_6697_Inv_Ext_APOG_Mod.g2u {0}{0}Subroutine: {1}{0}Error: {2} with Description: {3}", v.Ambient.NewLine, v.Args.CurrentSub, v.Ambient.ErrorNumber, v.Ambient.ErrorDescription, v.Local.sError)
+f.Intrinsic.UI.Msgbox(v.Local.sError)
+Program.Sub.ErrorMsg.End
+
+Program.Sub.Comments.Start
+${$5$}$20.1.8578.15441$}$1
+${$6$}$dhughes$}$20230705091057258$}$c2B0VQGdJshzQXwjoX6JDhriKzL/P++Drm85w1Vs+2nD3ObMYzkCGRgljaedPVvJUroehz/LBwY=
+Program.Sub.Comments.End
